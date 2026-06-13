@@ -275,11 +275,8 @@ def make_summary():
     maxi_data, swift_data, maxi_swift = check_maxi_with_swift()
 
     ztf_names = crossmatch_ztf(maxi_data)
-    ztf_data = pd.read_csv("ztf_results_maxi_v2.csv")
-    ztf_names = ztf_data["target_name"].tolist()
-
-    logger.info(ztf_names)
-
+    
+    
     if ztf_names is not None:
         not_ztf_names = maxi_data[~maxi_data["source_name"].isin(ztf_names)]
     else:
