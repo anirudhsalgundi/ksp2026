@@ -274,8 +274,7 @@ def crossmatch_atlas(input_data):
 def make_summary():
     maxi_data, swift_data, maxi_swift = check_maxi_with_swift()
 
-    #maxi_data = pd.read_csv("swift_data_test.csv")
-    #ztf_names = crossmatch_ztf(maxi_data)
+    ztf_names = crossmatch_ztf(maxi_data)
     ztf_data = pd.read_csv("ztf_results_maxi_v2.csv")
     ztf_names = ztf_data["target_name"].tolist()
 
@@ -285,8 +284,6 @@ def make_summary():
         not_ztf_names = maxi_data[~maxi_data["source_name"].isin(ztf_names)]
     else:
         not_ztf_names = maxi_data["source_name"].tolist()
-
-    not_ztf_names = not_ztf_names.iloc[8:]
     
     atlas_names = crossmatch_atlas(not_ztf_names)
 
@@ -301,31 +298,6 @@ def make_summary():
     
 
 def main():
-    #maxi_data = load_maxi_data()
-    #maxi_data = pd.read_csv("swift_data_test.csv")
-    """ztf_names = ['QSO B0003-066', 'PSR J0007+7303']
-    not_ztf_names = maxi_data[~maxi_data["source_name"].isin(ztf_names)]
-    print(not_ztf_names.head())
-    print(not_ztf_names.columns)
-    names = (not_ztf_names['source_name'])
-
-    print(names)"""
-
-    #maxi_data = pd.read_csv("swift_data_test.csv")
-    #print(maxi_data.head())
-    #print(maxi_data.columns)
-    #swift_data = load_swift_data()
-    #print(swift_data.head())
-    #print(swift_data.columns)
-
-    #maxi_data, swift_data, maxi_swift = check_maxi_with_swift()
-    #print("MAXI-Swift crossmatch complete. Number of matches: ", len(maxi_swift))
-    #print("Matched sources: ", maxi_swift)
-
-    #names = crossmatch_atlas(maxi_data)
-    #print(names)
-
-
 
     make_summary()
     return None
