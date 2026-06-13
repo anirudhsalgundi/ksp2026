@@ -278,6 +278,7 @@ def make_summary():
     ztf_data = pd.read_csv("ztf_results_maxi_v2.csv")
     ztf_names = ztf_data["target_name"].tolist()
 
+    logger.info(ztf_names)
 
     if ztf_names is not None:
         not_ztf_names = maxi_data[~maxi_data["source_name"].isin(ztf_names)]
