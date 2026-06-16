@@ -41,11 +41,13 @@ for index, row in maxi_df.iterrows():
         "n_ztf_matches": 0
     }
 
-    # (within ~5 arcseconds / 0.00139 degrees)
-    swift_matches = swift_df[
-        (np.abs(swift_df["RA J2000 Degs"] - ra_val) < 0.00139) &
-        (np.abs(swift_df["Dec J2000 Degs"] - dec_val) < 0.00139)
-    ]
+     # (within ~5 arcseconds)
+    maxi_coord = SkyCoord(ra=ra_val, dec=dec_val, unit=(u.deg, u.deg))
+    swift_coords = SkyCoord(ra=swift_df["RA J2000 Degs"].values, dec=swift_df["Dec J2000 Degs"].values, unit=(u.deg, u.deg))
+    
+    seps = maxi_coord.separation(swift_coords)
+    swift_matches = swift_df[seps < 5 * u.arcsec]
+    
     if not swift_matches.empty:
         match_record.update({
             "swift_match_found": True,
