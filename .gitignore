@@ -1,2 +1,8 @@
 *fits
 *csv
+*data
+plots/
+newdata/
+data/
+ZRB_Crossmatcher.py
+categoriser.py
