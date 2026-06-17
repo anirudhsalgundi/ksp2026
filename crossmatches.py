@@ -13,6 +13,8 @@ import pandas as pd
 from alerce.core import Alerce
 import requests
 
+from bs4 import BeautifulSoup
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,31 +43,50 @@ def load_maxi_data():
 
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers = headers)
+        response = requests.get(url, headers=headers)
         response.raise_for_status()
+        logger.debug("1")
+        
+        # FIX 1: Explicitly tell pandas to use 'lxml' or 'html5lib' as the flavor
+        # This prevents pandas from guessing incorrectly or failing silently.
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table')
 
-        tables = pd.read_html(response.text)
-        maxi_data = tables[0]
-
+        data = []
+        for row in table.find_all('tr'):
+            cols = [td.get_text(strip=True) for td in row.find_all(['td', 'th'])]
+            if cols:
+                data.append(cols)
+        maxi_data = pd.DataFrame(data)
+        logger.debug("2")
         
         maxi_data.columns = maxi_data.iloc[0]
-
+        logger.debug("3")
         maxi_data = maxi_data[1:].reset_index(drop=True)
         maxi_data.rename(columns={'source name': 'source_name'}, inplace=True)
-        maxi_data[['RA', 'Dec']] = maxi_data['R.A., Dec'].str.split(', ', expand=True) # Separating RA and Dec into two columns
-
+        
+        split_coords = maxi_data['R.A., Dec'].str.split(',', expand=True)
+        logger.debug("4")
+        
+        maxi_data['RA'] = split_coords[0].str.strip()
+        maxi_data['Dec'] = split_coords[1].str.strip()
+        logger.debug("5")
+        
         maxi_data['RA'] = pd.to_numeric(maxi_data['RA'], errors='coerce')
         maxi_data['Dec'] = pd.to_numeric(maxi_data['Dec'], errors='coerce')
+        logger.debug("6")
 
         logger.info("Maxi data loaded")
         return maxi_data
+        
     except Exception as e:
-        logger.error("Failed to load MAXI data:", {e})
-        return None
+        # FIX 2: Use an f-string so the actual error prints cleanly to your terminal
+        logger.error(f"Failed to load MAXI data: {e}")
+        return pd.DataFrame()
 
 def load_swift_data():
     try:
-        with fits.open("BAT_catalog.fits") as hdul:
+        with fits.open("data\BAT_catalog.fits") as hdul:
             data = hdul['INPUT_CATALOG'].data
         df = pd.DataFrame(data)
 
@@ -274,23 +295,33 @@ def crossmatch_atlas(input_data):
 def make_summary():
     maxi_data, swift_data, maxi_swift = check_maxi_with_swift()
 
-    ztf_names = crossmatch_ztf(maxi_data)
+    #ztf_names = crossmatch_ztf(maxi_data)
     
-    
+    df = pd.read_csv('ztf_results_maxi_v2.csv')
+
+    # .iloc[:, 0] grabs the 1st column regardless of its header name
+    ztf_names = df.iloc[:, 0].tolist()
+
     if ztf_names is not None:
         not_ztf_names = maxi_data[~maxi_data["source_name"].isin(ztf_names)]
     else:
         not_ztf_names = maxi_data["source_name"].tolist()
     
-    atlas_names = crossmatch_atlas(not_ztf_names)
+
+
+    not_ztf_names = not_ztf_names[not_ztf_names['Dec'] > -50]
+
+
+    logger.info(not_ztf_names)
+    atlas_names = crossmatch_atlas(not_ztf_names) 
 
     results_summary = []
     for name in maxi_data['source_name']:
-        temp = [name, maxi_data["source_name"].isin([name]).any(), name in maxi_swift, name in ztf_names, name in atlas_names]
+        temp = [name, maxi_data["source_name"].isin([name]).any(), name in maxi_swift, name in ztf_names]
         results_summary.append(temp)
 
-    df = pd.DataFrame(results_summary, columns=["name", "in_maxi", "in_swift", "in_ztf", "not_ztf_in_atlas"])
-    df.to_csv("summary.csv", index=False) 
+    df = pd.DataFrame(results_summary, columns=["name", "in_maxi", "in_swift", "in_ztf"])
+    df.to_csv("summary_maxi_swift_ztf.csv", index=False) 
     return None
     
 
