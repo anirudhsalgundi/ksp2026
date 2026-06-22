@@ -1,7 +1,7 @@
 # =====================================================
 # Imports
 # =====================================================
-
+import logging
 import os
 import ssl
 import re
@@ -24,10 +24,20 @@ from time import perf_counter
 # =====================================================
 # Configuration
 # =====================================================
+
+# Logging configuration
+logging.basicConfig(
+    filename="crossmatches.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ── Credentials ───────────────────────────────────────────────────────────────
-ATLAS_USER = "#######"   # Register at fallingstar-data.com/forcedphot
-ATLAS_PASS = "#######"
+ATLAS_USER = os.environ.get("ATLAS_USER")
+ATLAS_PASS = os.environ.get("ATLAS_PASS")
 
 SWIFT_CSV  = os.path.join(BASE_DIR, "Swift_BAT_Transient_Sources.csv")
 MAXI_CSV   = os.path.join(BASE_DIR, "MAXI_Sources.csv")
@@ -42,11 +52,6 @@ ATLAS_START_MJD = 57940   # 2017-06-01  (conservative start for reliable coverag
 # ── Search radius ─────────────────────────────────────────────────────────────
 CONE_RADIUS_ARCSEC = 5  
 
-# ── Outburst detection ────────────────────────────────────────────────────────
-# A source is flagged as "has outburst" if its peak flux exceeds this multiple
-# of its median flux in the MAXI or Swift light curve.
-OUTBURST_SIGMA_THRESHOLD = 5   # sigma above median
-
 # ── File paths ────────────────────────────────────────────────────────────────
 # CSV catalogs — expected in the same folder as this config.py
 SWIFT_CSV  = os.path.join(BASE_DIR, "Swift_BAT_Transient_Sources.csv")
@@ -55,9 +60,8 @@ MAXI_CSV   = os.path.join(BASE_DIR, "MAXI_Sources.csv")
 DATA_DIR        = os.path.join(BASE_DIR, "data")
 RESULTS_DIR     = os.path.join(BASE_DIR, "results")
 LIGHTCURVE_DIR  = os.path.join(DATA_DIR, "lightcurves")
-PLOT_DIR        = os.path.join(RESULTS_DIR, "plots")
 
-for d in [DATA_DIR, RESULTS_DIR, LIGHTCURVE_DIR, PLOT_DIR,
+for d in [DATA_DIR, RESULTS_DIR, LIGHTCURVE_DIR, 
           os.path.join(LIGHTCURVE_DIR, "maxi"),
           os.path.join(LIGHTCURVE_DIR, "swift"),
           os.path.join(LIGHTCURVE_DIR, "ztf"),
@@ -78,7 +82,20 @@ ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
 
 def http_request(method, url, headers=None, data=None, timeout=30):
-    """Unified HTTP helper wrapping urllib with certifi SSL contexts."""
+    """
+        Generic HTTP wrapper used by the ATLAS API.
+
+        Used for:
+        - authentication
+        - job submission
+        - job status polling
+        - result retrieval
+
+        Returns:
+        status code,
+        response body,
+        response headers
+    """
     req_headers = headers or {}
     req_data = None
     if data is not None:
@@ -138,6 +155,8 @@ def crossmatch_swift(
         dec=maxi_dec * u.deg
     )
 
+# match_to_catalog_sky() already returns the nearest neighbour.
+# idx corresponds to the minimum angular separation source.
     idx, sep2d, _ = maxi_coord.match_to_catalog_sky(
         swift_coords
     )
@@ -301,27 +320,6 @@ def fetch_maxi_lightcurve(source_name, ra, dec):
     print(f"  MAXI fetch completely failed for {source_name}")
     return None
 
-# =============================================================================
-# OUTBURST DETECTION
-# =============================================================================
-
-def detect_outburst(lc_df, rate_col, err_col, sigma=OUTBURST_SIGMA_THRESHOLD):
-    """Flags if peak flux variance breaches standard MAD scales."""
-    if lc_df is None or len(lc_df) < 10:
-        return False
-
-    rates = lc_df[rate_col].dropna()
-    rates = rates[rates > 0]
-    if len(rates) < 5:
-        return False
-
-    median = rates.median()
-    mad    = (rates - median).abs().median()
-    if mad == 0:
-        mad = rates.std() + 1e-6
-
-    return float(rates.max()) > (median + sigma * mad)
-
 # =====================================================
 # ZTF Functions
 # =====================================================
@@ -465,7 +463,7 @@ def collect_atlas_result(task_url, source_name, token, save_path):
             print(f"  ATLAS: no detections above S/N>3 for {source_name}")
             return False, 0
         
-        print(f"Saving Swift CSV to: {save_path}")
+        logger.info(f"Saving ATLAS CSV to: {save_path}")
         df.to_csv(save_path, index=False)
         n_bands = int(df['F'].nunique()) if 'F' in df.columns else 1
         return True, n_bands
@@ -502,7 +500,8 @@ def classify(row):
 # Main Pipeline
 # =====================================================
 
-def run_pipeline():
+def run_pipeline(base_dir="."):
+    DATA_DIR = os.path.join(base_dir, "data")
     maxi_df, swift_df, swift_coords = load_catalogs()
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -515,10 +514,10 @@ def run_pipeline():
 
     try:
         atlas_token = get_atlas_token()
-        print("ATLAS token obtained successfully.")
+        logger.info("ATLAS token obtained")
     except Exception as e:
         atlas_token = None
-        print(
+        logger.warning(
             f"Warning: Could not get ATLAS token ({e}). "
             f"ATLAS queries will be skipped."
         )
@@ -526,7 +525,7 @@ def run_pipeline():
     results = []
     atlas_jobs = {}
 
-    print(
+    logger.info(
         "\n=== PHASE 1: X-ray + ZTF crossmatch + "
         "ATLAS job submission ==="
     )
@@ -539,7 +538,7 @@ def run_pipeline():
         ra   = row[1]
         dec  = row[2]
 
-        print(
+        logger.info(
             f"\n[{i}/{len(maxi_df)}] "
             f"{name}  (RA={ra:.3f}, Dec={dec:.3f})"
         )
@@ -562,7 +561,7 @@ def run_pipeline():
 
         maxi_time = perf_counter() - t0
 
-        print(
+        logger.info(
             f"  MAXI fetch took "
             f"{maxi_time:.2f} s"
         )
@@ -571,18 +570,6 @@ def run_pipeline():
             2 if maxi_lc is not None and len(maxi_lc) > 0
             else 0
         )
-
-        has_outburst = False
-
-        if (
-            maxi_lc is not None
-            and 'rate_4_10keV' in maxi_lc.columns
-        ):
-            has_outburst = detect_outburst(
-                maxi_lc,
-                'rate_4_10keV',
-                'err_4_10keV'
-            )
 
         # ==========================================================
         # SWIFT CROSSMATCH
@@ -596,7 +583,7 @@ def run_pipeline():
             swift_coords
         )
 
-        print(
+        logger.info(
             f"  Swift crossmatch took "
             f"{perf_counter()-t0:.3f} s"
         )
@@ -617,7 +604,7 @@ def run_pipeline():
                 swift_name
             )
 
-            print(
+            logger.info(
                 f"  Swift LC fetch took "
                 f"{perf_counter()-t0:.2f} s"
             )
@@ -629,14 +616,14 @@ def run_pipeline():
                 else 0
             )
 
-            print(
+            logger.info(
                 f"  Swift match: "
                 f"{swift_name} "
                 f"({swift_sep:.1f} arcsec)"
             )
 
         else:
-            print("  Swift: no match")
+            logger.info("  Swift: no match")
 
         n_xray_bands = (
             n_maxi_bands +
@@ -654,12 +641,12 @@ def run_pipeline():
             name
         )
 
-        print(
+        logger.info(
             f"  ZTF query took "
             f"{perf_counter()-t0:.2f} s"
         )
 
-        print(
+        logger.info(
             f"  ZTF: "
             f"{'found' if ztf_found else 'not found'} "
             f"({n_ztf_bands} bands)"
@@ -685,9 +672,7 @@ def run_pipeline():
         ):
 
             if atlas_cached:
-                print(
-                    "  ATLAS: already cached"
-                )
+                logger.info("  ATLAS: already cached")
 
             else:
                 task_url = submit_atlas_job(
@@ -698,22 +683,19 @@ def run_pipeline():
 
                 if task_url:
                     atlas_jobs[name] = task_url
-                    print(
-                        "  ATLAS: job submitted"
-                    )
+                    logger.info("  ATLAS: job submitted")
                 else:
-                    print(
-                        "  ATLAS: submission failed"
-                    )
+                    logger.error("  ATLAS: submission failed")
+                    
 
         elif ztf_found:
-            print(
+            logger.info(
                 "  ATLAS: skipped "
                 "(ZTF data available)"
             )
 
         elif dec < -50:
-            print(
+            logger.info(
                 "  ATLAS: skipped "
                 "(dec < -50)"
             )
@@ -721,7 +703,7 @@ def run_pipeline():
         # ==========================================================
         # TOTAL TIME
         # ==========================================================
-        print(
+        logger.info(
             f"  TOTAL SOURCE TIME: "
             f"{perf_counter()-source_start:.2f} s"
         )
@@ -740,8 +722,6 @@ def run_pipeline():
 
             'n_xray_bands': n_xray_bands,
 
-            'has_outburst': has_outburst,
-
             'ztf_found': ztf_found,
             'ztf_oid': ztf_oid,
             'n_ztf_bands': n_ztf_bands,
@@ -754,26 +734,26 @@ def run_pipeline():
             'classification': None
         })
 
-    print(
+    logger.info(
         f"\n=== PHASE 1 complete. "
         f"{len(atlas_jobs)} ATLAS jobs submitted. ==="
     )
 
     if atlas_jobs:
-        print(
+        logger.info(
             "Waiting 30s before polling "
             "ATLAS results..."
         )
         time.sleep(30)
 
 # ── PHASE 2: Save ATLAS job URLs for standalone polling ───────────────────
-    print(f"\n=== PHASE 1 complete. {len(atlas_jobs)} ATLAS jobs submitted. ===")
+    logger.info(f"\n=== PHASE 1 complete. {len(atlas_jobs)} ATLAS jobs submitted. ===")
 
     jobs_path = os.path.join(RESULTS_DIR, "atlas_jobs.json")
     with open(jobs_path, 'w') as f:
         json.dump(atlas_jobs, f, indent=2)
-    print(f"ATLAS job URLs saved to {jobs_path}")
-    print("Run poll_atlas.py in a new terminal to collect ATLAS results.\n")
+    logger.info(f"ATLAS job URLs saved to {jobs_path}")
+    logger.info("Run poll_atlas.py in a new terminal to collect ATLAS results.\n")
 
     # Load any already-cached ATLAS results (from previous runs)
     results_by_name = {r['source_name']: r for r in results}
@@ -793,42 +773,35 @@ def run_pipeline():
                 r['n_atlas_bands'] = 0
 
     # ── PHASE 3: Classify all sources (ATLAS pending sources classified without it)
-    print("=== PHASE 3: Classifying sources ===")
+    logger.info("=== PHASE 3: Classifying sources ===")
     for r in results:
         r['classification'] = classify(pd.Series(r))
-        print(f"  {r['source_name']}: {r['classification']} "
-              f"| outburst={r['has_outburst']} "
-              f"| X-ray={r['n_xray_bands']} | optical={r['n_optical_bands']}")
+        logger.info(f"  {r['source_name']}: {r['classification']} "
+                    f"| X-ray={r['n_xray_bands']} | optical={r['n_optical_bands']}")
 
-    # Save results — poll_atlas.py will update classifications once ATLAS is done
+    # Save preliminary results (ATLAS results will be added later)
     df = pd.DataFrame(results)
     df.to_csv(out_path, index=False)
 
-    print("\n" + "="*60)
-    print("PIPELINE EXECUTION COMPLETE")
-    print("="*60)
-    print(f"\nTotal tracked targets: {len(df)}")
-    print("NOTE: ATLAS results are pending. Run poll_atlas.py to finalize classifications.")
+    logger.info("=" * 60)
+    logger.info("PIPELINE EXECUTION COMPLETE")
+    logger.info("=" * 60)
 
-    print("\nOverall Tier Breakdowns (preliminary — ATLAS pending):")
-    print(df['classification'].value_counts().to_string())
+    logger.info(f"Total tracked targets: {len(df)}")
+    logger.info(f"Saved preliminary results to: {out_path}")
 
-    print("\nCategorized Metrics (With Active Outbursts):")
-    outburst_df = df[df['has_outburst']]
-    if not outburst_df.empty:
-        print(outburst_df['classification'].value_counts().to_string())
-    else:
-        print("None detected")
+    if atlas_jobs:
+        logger.info(
+            f"ATLAS jobs submitted: {len(atlas_jobs)}. "
+            "Run poll_atlas.py later to collect ATLAS results."
+        )
 
-    print("\nCategorized Metrics (Without Active Outbursts):")
-    no_outburst_df = df[~df['has_outburst']]
-    if not no_outburst_df.empty:
-        print(no_outburst_df['classification'].value_counts().to_string())
-    else:
-        print("None detected")
-
-    print(f"\nSaved preliminary results to: {out_path}")
-    print(f"Run poll_atlas.py to collect ATLAS data and update classifications.")
+    logger.info("\nCurrent classification breakdown:")
+    logger.info(df["classification"].value_counts().to_string())
+    logger.info(
+    "Results saved without ATLAS crossmatches. "
+    "ATLAS results will be appended when poll_atlas.py completes."
+    )
     return df
 
 if __name__ == "__main__":
