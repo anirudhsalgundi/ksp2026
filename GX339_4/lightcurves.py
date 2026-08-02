@@ -6,7 +6,7 @@ import numpy as np
 
 
 #### SWIFT ####
-lc_table = Table.read('GX339_4/GX339-4.lc.fits', hdu='RATE')
+lc_table = Table.read('~/Desktop/ksp2026/GX339_4/GX339-4.lc.fits', hdu='RATE')
 
 
 x_swift = (lc_table['TIME'])
@@ -15,15 +15,15 @@ y_swift = lc_table['RATE']
 
 #### MAXI ####
 
-maxi_table = pd.read_csv("GX339_4\gx339_4_maxi_data.csv", sep=' ', header = None)
+maxi_table = pd.read_csv("~/Desktop/ksp2026/GX339_4/gx339_4_maxi_data.csv", sep=' ', header = None)
 
 x_maxi = maxi_table[0].tolist()
 y_maxi = maxi_table[1].tolist()
-print(y_maxi)
+
 
 #### Optical ####
 
-optical_table = pd.read_csv("GX339_4\gx339_4_yale_data.csv", sep=r'\s+', header = None)
+optical_table = pd.read_csv("~/Desktop/ksp2026/GX339_4/gx339_4_yale_data.csv", sep=r'\s+', header = None)
 
 #x_opt = optical_table[0].tolist()+2450000
 
@@ -50,13 +50,18 @@ fig, axs = plt.subplots(
 
 axs[0].plot(x_swift, y_swift, "k.", markersize=2, )  
 axs[0].set_title('Swift')
+axs[0].set_ylabel('Counts/cm^2/sec (15-50 keV)')
 axs[1].plot(x_maxi, y_maxi, "r.", markersize=2)  
 axs[1].set_title('MAXI')
+axs[1].set_ylabel('2-20keV [ph/s/cm2]')
 axs[2].plot(x_V, y_V, "g.", markersize=2) 
 axs[2].set_title('V optical')
+axs[2].set_ylabel('Magnitude')
 axs[3].plot(x_I, y_I, "b.", markersize=2)  
 axs[3].set_title('I optical')
+axs[3].set_ylabel('Magnitude')
 
+axs[3].set_xlabel('MJD')
 
 for i, ax in enumerate(axs):
     ax.axhline(0, color="black", linestyle=":", linewidth=0.8)
@@ -72,5 +77,5 @@ axs[-1].set_xlim(min_time, max_time)
 
 axs[0].set_title("GX 339-4, V821 Ara", loc="left", fontsize=12)
 
-plt.savefig('GX339_4\GX339_4.png')
+plt.savefig('/home/Vidhi/Desktop/ksp2026/plots_xrb/GX 339-4.svg')
 plt.show()
